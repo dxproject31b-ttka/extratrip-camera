@@ -1,0 +1,260 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+    <title>STANDALONE CAMERA PRO</title>
+    <script src="https://cdn.tailwindcss.com?version=3.4.1"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Kanit:wght@300;400;500;600&family=Space+Grotesk:wght@500;700&display=swap" rel="stylesheet">
+    <style>
+        body { 
+            font-family: 'Kanit', 'Space Grotesk', sans-serif; 
+            background-color: #020617; 
+            color: #ffffff; 
+            overscroll-behavior: none;
+        }
+        .glass-bento {
+            background: rgba(15, 23, 42, 0.65);
+            backdrop-filter: blur(20px) saturate(1.5);
+            -webkit-backdrop-filter: blur(20px) saturate(1.5);
+            border: 1px solid rgba(255, 255, 255, 0.08);
+        }
+    </style>
+</head>
+<body class="flex flex-col items-center justify-between min-h-[100dvh] p-4 relative overflow-hidden">
+    <div class="absolute inset-0 bg-gradient-to-b from-slate-900 via-slate-950 to-black z-0"></div>
+
+    <!-- ส่วนหัวหน้าจอ -->
+    <div class="relative z-10 text-center w-full mt-2">
+        <h2 class="text-indigo-400 text-base font-bold tracking-widest uppercase">STANDALONE CAMERA PRO</h2>
+        <p class="text-[11px] text-slate-400 mt-0.5 uppercase tracking-wider">Side Target: <span class="text-rose-400" id="side-indicator">...</span></p>
+    </div>
+
+    <!-- พื้นที่แสดงกล้อง / แสดงรูปตัวอย่าง -->
+    <div class="relative z-10 w-full max-w-sm aspect-[4/3] rounded-3xl overflow-hidden glass-bento flex flex-col items-center justify-center border border-white/10 shadow-2xl my-2">
+        
+        <!-- 1. ส่วน Live Camera (WebRTC Video Stream) -->
+        <video id="webcam" autoplay playsinline class="absolute inset-0 w-full h-full object-cover hidden"></video>
+        
+        <!-- 2. ส่วนกล้องดั้งเดิมของระบบปฏิบัติการ (Fallback Input) -->
+        <div id="fallback-ui" class="flex flex-col items-center p-6 text-center space-y-4 cursor-pointer">
+            <input type="file" id="native-camera" accept="image/*" capture="environment" class="hidden" />
+            <div class="w-16 h-16 rounded-full bg-indigo-600/20 text-indigo-400 flex items-center justify-center border border-indigo-500/30">
+                <svg xmlns="http://www.w3.org/2000/svg" width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M14.5 4h-5L7 7H4a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V9a2 2 0 0 0-2-2h-3l-2.5-3z"/><circle cx="12" cy="13" r="3"/></svg>
+            </div>
+            <div>
+                <h3 class="font-medium text-[15px] text-white tracking-wide">แตะพื้นที่นี้เพื่อเปิดกล้อง</h3>
+                <p class="text-[11px] text-slate-400 mt-0.5 uppercase tracking-widest">Tap to trigger native camera</p>
+            </div>
+        </div>
+
+        <!-- 3. เฟรมสำหรับแสดงรูปที่ถ่ายแล้ว -->
+        <img id="preview-img" class="absolute inset-0 w-full h-full object-cover hidden" />
+        
+        <!-- 4. สปินเนอร์ตอนประมวลผล / บีบอัดภาพ -->
+        <div id="loading-spinner" class="absolute inset-0 bg-black/80 backdrop-blur-md flex flex-col items-center justify-center hidden">
+            <div class="w-10 h-10 border-4 border-indigo-500 border-t-transparent rounded-full animate-spin"></div>
+            <p class="text-[11px] text-indigo-400 font-mono tracking-widest mt-4 uppercase">COMPRESSING...</p>
+        </div>
+    </div>
+
+    <!-- ซ่อน Canvas สำหรับบีบอัดรูปภาพ -->
+    <canvas id="compress-canvas" class="hidden"></canvas>
+
+    <!-- แผงปุ่มควบคุมด้านล่าง -->
+    <div class="relative z-10 w-full max-w-sm flex flex-col items-center gap-3 mb-4">
+        <!-- ปุ่มกดชัตเตอร์สำหรับกล้องวิดีโอสด -->
+        <button id="shutter-btn" class="w-full py-3.5 bg-indigo-600 hover:bg-indigo-500 text-white font-semibold rounded-2xl flex items-center justify-center gap-2 shadow-lg shadow-indigo-600/30 transition-all text-[15px] hidden">
+            <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="3"/></svg>
+            <span>กดถ่ายภาพ</span>
+        </button>
+
+        <!-- ปุ่มสำหรับสลับกล้องหน้า-หลัง (โชว์เฉพาะเวลากล้องสดทำงาน) -->
+        <button id="switch-camera-btn" class="w-full py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 font-medium rounded-xl flex items-center justify-center gap-2 transition-all text-xs hidden">
+            <span>🔄 สลับกล้อง (หน้า/หลัง)</span>
+        </button>
+
+        <!-- ปุ่มกดส่งข้อมูลภาพถ่ายกลับไปหน้าหลัก -->
+        <button id="save-close-btn" disabled class="w-full py-3.5 bg-slate-800 text-slate-500 font-semibold rounded-2xl flex items-center justify-center gap-2 shadow-sm transition-all text-[14px] cursor-not-allowed">
+            <span>โปรดถ่ายรูปก่อนกดส่งข้อมูล</span>
+        </button>
+        <p class="text-[9px] text-slate-500 text-center font-medium uppercase tracking-wider">Powered by Standalone Camera Bypass Protocol</p>
+    </div>
+
+    <script>
+        // ดึงพารามิเตอร์ฝั่งการทำงานของกล้อง
+        const urlParams = new URLSearchParams(window.location.search);
+        const side = urlParams.get('side') || "left";
+        document.getElementById("side-indicator").innerText = side;
+
+        const video = document.getElementById("webcam");
+        const fallbackUi = document.getElementById("fallback-ui");
+        const nativeCamera = document.getElementById("native-camera");
+        const previewImg = document.getElementById("preview-img");
+        const loadingSpinner = document.getElementById("loading-spinner");
+        const canvas = document.getElementById("compress-canvas");
+        const shutterBtn = document.getElementById("shutter-btn");
+        const switchCameraBtn = document.getElementById("switch-camera-btn");
+        const saveCloseBtn = document.getElementById("save-close-btn");
+
+        let localStream = null;
+        let currentFacingMode = "environment"; 
+        let compressedPayload = null;
+
+        // เริ่มต้นการเชื่อมต่อสตรีมวิดีโอกล้องสด
+        async function startWebcam() {
+            try {
+                if (localStream) {
+                    localStream.getTracks().forEach(track => track.stop());
+                }
+                localStream = await navigator.mediaDevices.getUserMedia({
+                    video: { facingMode: currentFacingMode, width: { ideal: 1280 }, height: { ideal: 720 } },
+                    audio: false
+                });
+                video.srcObject = localStream;
+                video.classList.remove("hidden");
+                shutterBtn.classList.remove("hidden");
+                switchCameraBtn.classList.remove("hidden");
+                fallbackUi.classList.add("hidden");
+            } catch (err) {
+                console.warn("ไม่สามารถเรียกใช้งานสตรีมกล้องสดได้ กำลังเข้าสู่โหมด Fallback:", err);
+                fallbackUi.classList.remove("hidden");
+                video.classList.add("hidden");
+                shutterBtn.classList.add("hidden");
+                switchCameraBtn.classList.add("hidden");
+            }
+        }
+
+        // เริ่มต้นใช้งานกล้องเมื่อเปิดหน้าเพจ
+        startWebcam();
+
+        // ฟังก์ชันสลับกล้องหน้าหลัง
+        switchCameraBtn.addEventListener("click", () => {
+            currentFacingMode = (currentFacingMode === "environment") ? "user" : "environment";
+            startWebcam();
+        });
+
+        // เมื่อทำงานในระบบดั้งเดิม (Fallback) สั่งเปิดแอปกล้องทันทีเมื่อคลิกการ์ด
+        fallbackUi.addEventListener("click", () => {
+            nativeCamera.click();
+        });
+
+        // ถ่ายรูปจากตัวสตรีมวิดีโอกล้องสด
+        shutterBtn.addEventListener("click", () => {
+            if (!localStream) return;
+            loadingSpinner.classList.remove("hidden");
+
+            const ctx = canvas.getContext("2d");
+            const width = video.videoWidth;
+            const height = video.videoHeight;
+            canvas.width = width;
+            canvas.height = height;
+
+            // วาดเฟรมปัจจุบันจากสตรีมลงบนแคนวาส
+            ctx.drawImage(video, 0, 0, width, height);
+            processAndPreview();
+        });
+
+        // ถ่ายรูปจากระบบดั้งเดิม (Fallback)
+        nativeCamera.addEventListener("change", (e) => {
+            const file = e.target.files?.[0];
+            if (!file) return;
+
+            loadingSpinner.classList.remove("hidden");
+
+            const reader = new FileReader();
+            reader.readAsDataURL(file);
+            reader.onload = (event) => {
+                const img = new Image();
+                img.src = event.target.result;
+                img.onload = () => {
+                    const ctx = canvas.getContext("2d");
+                    let { width, height } = img;
+                    const maxDim = 800;
+
+                    if (width > height && width > maxDim) {
+                        height *= maxDim / width;
+                        width = maxDim;
+                    } else if (height > maxDim) {
+                        width *= maxDim / height;
+                        height = maxDim;
+                    }
+
+                    canvas.width = width;
+                    canvas.height = height;
+                    ctx.drawImage(img, 0, 0, width, height);
+                    processAndPreview();
+                };
+            };
+        });
+
+        // ฟังก์ชันประมวลผลรูปภาพและเตรียมข้อมูล Payload
+        function processAndPreview() {
+            const dataUrl = canvas.toDataURL("image/jpeg", 0.8);
+            const base64Str = dataUrl.split(",")[1];
+
+            // แสดงภาพตัวอย่าง
+            previewImg.src = dataUrl;
+            previewImg.classList.remove("hidden");
+            video.classList.add("hidden");
+            fallbackUi.classList.add("hidden");
+            loadingSpinner.classList.add("hidden");
+            shutterBtn.classList.add("hidden");
+            switchCameraBtn.classList.add("hidden");
+
+            // ดับสัญญาณสตรีมกล้องสดเพื่อประหยัดแบตเตอรี่เครื่อง
+            if (localStream) {
+                localStream.getTracks().forEach(track => track.stop());
+                localStream = null;
+            }
+
+            // จัดทำ Payload ข้อมูลรูปภาพ
+            compressedPayload = {
+                type: "CAMERA_CAPTURE",
+                side: side,
+                base64: base64Str,
+                mimeType: "image/jpeg",
+                name: `standalone_${side}_${new Date().getTime()}.jpg`,
+                timestamp: Date.now()
+            };
+
+            // เปิดให้ใช้ปุ่มนำส่งข้อมูล
+            saveCloseBtn.removeAttribute("disabled");
+            saveCloseBtn.classList.remove("bg-slate-800", "text-slate-500", "cursor-not-allowed");
+            saveCloseBtn.classList.add("bg-rose-600", "hover:bg-rose-500", "text-white", "shadow-lg", "shadow-rose-600/30");
+            saveCloseBtn.innerHTML = "<span>✓ ส่งข้อมูลและปิดหน้าต่าง</span>";
+        }
+
+        // นำส่งข้อมูลกลับไปยังหน้าเว็บหลัก
+        saveCloseBtn.addEventListener("click", () => {
+            if (!compressedPayload) return;
+
+            let isSent = false;
+
+            // วิธีส่งข้อมูลผ่าน window.opener (สำหรับการเชื่อมต่อข้ามโดเมนอย่างปลอดภัย)
+            if (window.opener) {
+                try {
+                    window.opener.postMessage(compressedPayload, "https://script.google.com");
+                    isSent = true;
+                } catch (e) {
+                    console.warn("ไม่สามารถส่งข้อมูลกลับไปยังระบบหลักผ่าน window.opener ได้: ", e);
+                }
+            }
+
+            // Fallback เก็บข้อมูลลง LocalStorage ของฝั่งบราวเซอร์ในโดเมนกล้อง
+            try {
+                localStorage.setItem("CAMERA_CAPTURE_FALLBACK", JSON.stringify(compressedPayload));
+                isSent = true;
+            } catch (e) {
+                console.error("จัดเก็บบันทึกบนเครื่องผู้ใช้ล้มเหลว: ", e);
+            }
+
+            if (isSent) {
+                window.close(); // ปิดแท็บทันที
+            } else {
+                alert("เกิดข้อผิดพลาดในการส่งข้อมูลรูปภาพกลับโปรแกรมหลัก");
+            }
+        });
+    </script>
+</body>
+</html>
